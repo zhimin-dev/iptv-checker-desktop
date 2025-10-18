@@ -7,6 +7,11 @@ iptv-checker-desktop
 
 [![Chat Server](https://img.shields.io/badge/chat-discord-7289da.svg)](https://discord.gg/vPTv6UUA)
 
+<img src="https://github.com/zhimin-dev/iptv-checker-desktop/blob/main/cn.png" />
+
+<img src="https://github.com/zhimin-dev/iptv-checker-desktop/blob/main/en.png" />
+
+</div>
 
 ## 介绍
 
