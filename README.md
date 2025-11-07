@@ -23,6 +23,9 @@ iptv-checker-desktop
 
 ## 更新日志
 
+- v4.1.8
+  - 修复了mac平台无法播放http链接源
+  - 尝试修复windows平台无法播放的问题
 - 4.1.7
   - 修复后台可能不正常执行的bug
   - 本地检测UI和后台检测UI复用
