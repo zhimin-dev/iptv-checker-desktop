@@ -9,6 +9,10 @@ export default defineConfig(async () => ({
   plugins: [react()],
   base:'/',
   clearScreen: false,
+  // Exclude Tauri APIs from Vite optimization — they rely on webview runtime globals
+  optimizeDeps: {
+    exclude: ['@tauri-apps/api/core', '@tauri-apps/api'],
+  },
   server: {
     port: 5173,
     strictPort: true,
