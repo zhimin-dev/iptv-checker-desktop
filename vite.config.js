@@ -9,24 +9,6 @@ export default defineConfig(async () => ({
   plugins: [react()],
   base:'/',
   clearScreen: false,
-  // Exclude all Tauri modules from Vite pre-bundling — they rely on
-  // window.__TAURI_INTERNALS__ which only exists inside the Tauri webview.
-  // Pre-bundling runs in Node.js where these modules crash (dynamic require, etc.)
-  optimizeDeps: {
-    exclude: [
-      '@tauri-apps/api',
-      '@tauri-apps/api/core',
-      '@tauri-apps/api/event',
-      '@tauri-apps/api/http',
-      '@tauri-apps/api/path',
-      '@tauri-apps/api/tauri',
-      '@tauri-apps/api/webviewWindow',
-      '@tauri-apps/api/window',
-      '@tauri-apps/plugin-dialog',
-      '@tauri-apps/plugin-fs',
-      '@tauri-apps/plugin-os',
-    ],
-  },
   server: {
     port: 5173,
     strictPort: true,
