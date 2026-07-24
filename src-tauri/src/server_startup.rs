@@ -72,13 +72,18 @@ pub fn init_all() {
     crate::common::util::rebuild_http_client();
     init_folder();
     init_translate();
-    // Spawn EPG background sync (daily)
-    tokio::spawn(async {
-        init_epg_data().await;
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
-        loop {
-            interval.tick().await;
+    // Spawn EPG background sync in a dedicated thread with its own Tokio runtime.
+    // Uses std::thread (not tokio::spawn) so it works without a pre-existing runtime
+    // — needed for Tauri desktop mode where Tokio isn't running at init time.
+    std::thread::spawn(|| {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
             init_epg_data().await;
-        }
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            loop {
+                interval.tick().await;
+                init_epg_data().await;
+            }
+        });
     });
 }
