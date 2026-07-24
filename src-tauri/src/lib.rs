@@ -181,6 +181,7 @@ pub fn run() {
 
             let server = actix_web::HttpServer::new(move || {
                 actix_web::App::new()
+                    .wrap(actix_cors::Cors::permissive())
                     .configure(web::configure_routes)
                     .app_data(actix_web::web::Data::new(scheduler.clone()))
                     .app_data(actix_web::web::Data::new(Arc::clone(&task_manager)))

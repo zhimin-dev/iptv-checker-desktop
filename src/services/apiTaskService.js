@@ -18,7 +18,8 @@ export class ApiTaskService {
                 } catch (e) {
                     // Fallback: not running in Tauri (dev mode with separate server)
                     this.baseUrl = '';
-                    console.log('[ApiTaskService] Not in Tauri, using proxy mode');
+                    console.warn('[ApiTaskService] invoke get_server_port failed:', e?.message || e);
+                    console.log('[ApiTaskService] Falling back to proxy mode (baseUrl empty)');
                 }
             })();
         }
