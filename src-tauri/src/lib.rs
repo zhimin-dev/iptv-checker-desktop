@@ -133,8 +133,10 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
-            let listener = TcpListener::bind("127.0.0.1:0")
-                .expect("Failed to bind to random port");
+            // Try fixed port first, fall back to random
+            let listener = TcpListener::bind("127.0.0.1:18089")
+                .or_else(|_| TcpListener::bind("127.0.0.1:0"))
+                .expect("Failed to bind to port");
             let port = listener.local_addr().unwrap().port();
 
             log::info!("Embedded server starting on 127.0.0.1:{}", port);

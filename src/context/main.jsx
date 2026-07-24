@@ -2,7 +2,7 @@ import { useState, createContext, useEffect, useRef } from "react"
 import axios from "axios"
 export const MainContext = createContext();
 import ParseM3u from '../utils/utils'
-import { invoke } from '@tauri-apps/api/core'
+
 import i18n from "i18next";
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 
@@ -147,14 +147,17 @@ export const MainContextProvider = function ({ children }) {
     }
 
     const checkFFmpeg = () => {
-        invoke("check_ffmpeg").then((result) => {
-            if (result) {
-                setFffmepgCheck(1)
-                console.log("FFmpeg is installed");
-            }
-        }).catch(e => {
-            console.log("invoke error",e)
-        })
+        if (!window.__TAURI_INTERNALS__) return
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+            invoke("check_ffmpeg").then((result) => {
+                if (result) {
+                    setFffmepgCheck(1)
+                    console.log("FFmpeg is installed");
+                }
+            }).catch(e => {
+                console.log("invoke error",e)
+            })
+        }).catch(() => {})
     }
 
     const initControlBar = (appWindow, pageLabel) => {
@@ -230,18 +233,23 @@ export const MainContextProvider = function ({ children }) {
         init_config_info()//初始化配置文件
         initCheckHistory()//初始化检查历史
         initSubCheckMenuList() //初始化子菜单
-        invoke('now_mod', {}).then((response) => {
-            setNowMod(response)
+        // Detect Tauri environment without IPC
+        if (window.__TAURI_INTERNALS__) {
+            setNowMod(1)
             initTitleBar()
-            console.log("now mod", response)
-            let os_type = type()
-            if (os_type !== '') {
-                console.log("now os type", os_type)
-                setNowPlatform(os_type)
+            console.log("now mod: 1 (Tauri)")
+            try {
+                let os_type = type()
+                if (os_type !== '') {
+                    console.log("now os type", os_type)
+                    setNowPlatform(os_type)
+                }
+            } catch (e) {
+                console.log("os type check failed:", e)
             }
-        }).catch(e => {
-            console.log("invoke---",e)
-        })
+        } else {
+            console.log("now mod: 0 (Server)")
+        }
         let setting = localStorage.getItem('settings') ?? ''
         if (setting !== '') {
             try {
