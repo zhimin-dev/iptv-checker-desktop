@@ -26,17 +26,21 @@ use std::sync::Mutex;
 #[cfg(feature = "desktop")]
 use tauri::{Manager, State};
 
+/// Global to bridge the embedded server port from setup() to the command handler.
+/// Avoids Tauri State complexity — OnceLock is set once during setup, read by command.
+#[cfg(feature = "desktop")]
+static SERVER_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+
 #[cfg(feature = "desktop")]
 struct AppState {
-    server_port: Mutex<u16>,
     ffmpeg_path: Mutex<String>,
     ffprobe_path: Mutex<String>,
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-fn get_server_port(state: State<AppState>) -> u16 {
-    *state.server_port.lock().unwrap()
+fn get_server_port() -> u16 {
+    SERVER_PORT.get().copied().unwrap_or(0)
 }
 
 #[cfg(feature = "desktop")]
@@ -192,8 +196,10 @@ pub fn run() {
             .expect("Failed to listen on TcpListener")
             .run();
 
+            // Store port globally for get_server_port command
+            SERVER_PORT.set(port).ok();
+
             app.manage(AppState {
-                server_port: Mutex::new(port),
                 ffmpeg_path: Mutex::new(ffmpeg_clone),
                 ffprobe_path: Mutex::new(ffprobe_clone),
             });
