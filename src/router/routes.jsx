@@ -43,17 +43,6 @@ export const routes = [
         }
     },
     {
-        path: "/local",
-        name: "本地任务",
-        icon: "LaptopIcon",
-        element: <LTask />,
-        handle: {
-            showMod: [1],
-            showHeader: true,
-            showSidebar: true
-        }
-    },
-    {
         path: "/watch",
         name: "在线观看",
         icon: "RemoveRedEyeIcon",
@@ -70,7 +59,7 @@ export const routes = [
         icon: "CloudQueueIcon",
         element: <Task />,
         handle: {
-            showMod: [0],
+            showMod: [0,1],
             showHeader: true,
             showSidebar: true
         }
@@ -81,7 +70,7 @@ export const routes = [
         icon: "FavoriteBorderIcon",
         element: <FavoriteSettings />,
         handle: {
-            showMod: [0],
+            showMod: [0,1],
             showHeader: true,
             showSidebar: true
         }
@@ -92,7 +81,7 @@ export const routes = [
         icon: "LiveTvIcon",
         element: <EpgChannelSearch />,
         handle: {
-            showMod: [0],
+            showMod: [0,1],
             showHeader: true,
             showSidebar: true
         }
@@ -102,7 +91,7 @@ export const routes = [
         element: <Navigate to="/epg-channel-search" replace />,
         hideInMenu: true,
         handle: {
-            showMod: [0],
+            showMod: [0,1],
             showHeader: true,
             showSidebar: true
         }

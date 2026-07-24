@@ -160,32 +160,48 @@ export const MainContextProvider = function ({ children }) {
         }).catch(() => {})
     }
 
-    const initControlBar = (appWindow, pageLabel) => {
-        document
-            .getElementById('titlebar-minimize')
-            ?.addEventListener('click', () => appWindow.minimize());
-        document
-            .getElementById('titlebar-maximize')
-            ?.addEventListener('click', () => {
+    const initControlBar = (appWindow, retries = 0) => {
+        const minBtn = document.getElementById('titlebar-minimize')
+        const maxBtn = document.getElementById('titlebar-maximize')
+        const closeBtn = document.getElementById('titlebar-close')
+
+        if (!minBtn || !closeBtn) {
+            // DOM not ready yet — retry after a short delay
+            if (retries < 10) {
+                console.log('[TitleBar] Buttons not found, retry', retries + 1)
+                setTimeout(() => initControlBar(appWindow, retries + 1), 200)
+            } else {
+                console.error('[TitleBar] Failed to find titlebar buttons after 10 retries')
+            }
+            return
+        }
+
+        console.log('[TitleBar] Attaching window controls')
+        minBtn.addEventListener('click', () => {
+            console.log('[TitleBar] minimize')
+            appWindow.minimize()
+        })
+        closeBtn.addEventListener('click', () => {
+            console.log('[TitleBar] close')
+            appWindow.close()
+        })
+        if (maxBtn) {
+            maxBtn.addEventListener('click', () => {
                 appWindow.isFullscreen().then((isFull) => {
-                    console.log("isfull", isFull);
+                    console.log('[TitleBar] toggle fullscreen, current:', isFull)
                     if (isFull) {
-                        appWindow.setSize(new LogicalSize(1024, 800)).then(() => { })
+                        appWindow.setSize(new LogicalSize(1024, 800))
                     } else {
-                        appWindow.setTitleBarStyle('transparent')
                         appWindow.setFullscreen(true)
-                        appWindow.center()
-                        setShowWindowsTopBar(false)
                     }
                 })
-            });
-        document
-            .getElementById('titlebar-close')
-            ?.addEventListener('click', () => appWindow.close());
+            })
+        }
     }
 
     const initTitleBar = () => {
         const appWindow = getCurrentWebviewWindow()
+        console.log('[TitleBar] init, appWindow:', !!appWindow)
         initControlBar(appWindow)
     }
 
