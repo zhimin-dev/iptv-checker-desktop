@@ -10,7 +10,7 @@ edition = "2021"
 rust-version = "1.60"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [lib]
 name = "iptv_checker_lib"
@@ -19,6 +19,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = ["desktop"]
 desktop = [
+    "tauri-build",
     "tauri",
     "tauri-plugin-dialog",
     "tauri-plugin-opener",

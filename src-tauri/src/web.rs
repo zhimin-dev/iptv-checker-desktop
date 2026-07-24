@@ -1741,23 +1741,10 @@ async fn get_unmapped_epg_channels() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({ "list": unmapped }))
 }
 
-/// Configure the actix-web App with all routes.
-/// Shared by desktop (Tauri) and server (standalone) modes.
-pub fn configure_app(
-    scheduler: std::sync::Arc<std::sync::Mutex<clokwerk::Scheduler>>,
-    task_manager: std::sync::Arc<TaskManager>,
-) -> actix_web::App<
-    impl actix_web::dev::ServiceFactory<
-        actix_web::dev::ServiceRequest,
-        Config = (),
-        Error = actix_web::Error,
-        InitError = (),
-    >,
-> {
-    use actix_web::web;
-
-    actix_web::App::new()
-        .service(get_epg)
+/// Configure actix-web routes (shared by desktop and server).
+/// Data (scheduler, task_manager) must be added by the caller via .app_data().
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(get_epg)
         .service(get_epg_channel_list)
         .service(get_epg_info)
         .service(get_epg_sources)
@@ -1801,15 +1788,12 @@ pub fn configure_app(
             "/static",
             crate::r#const::constant::STATIC_FOLDER.to_owned(),
         ).show_files_listing())
-        .app_data(web::Data::new(scheduler))
-        .app_data(web::Data::new(task_manager))
         .route("/tasks/list", web::get().to(list_task))
         .route("/tasks/run", web::get().to(run_task))
         .route("/tasks/update", web::post().to(update_task))
         .route("/tasks/add", web::post().to(add_task))
         .route("/tasks/delete/{id}", web::delete().to(delete_task))
-        .service(actix_files::Files::new("/", "./web/"))
-        .wrap(actix_web::middleware::Logger::default())
+        .service(actix_files::Files::new("/", "./web/"));
 }
 
 /// Start the web server (standalone mode — binds 0.0.0.0:port, handles Ctrl+C).
@@ -1898,7 +1882,11 @@ pub async fn start_web(port: u16) {
     }
 
     let server = actix_web::HttpServer::new(move || {
-        configure_app(scheduler.clone(), Arc::clone(&task_manager))
+        actix_web::App::new()
+            .configure(configure_routes)
+            .app_data(actix_web::web::Data::new(scheduler.clone()))
+            .app_data(actix_web::web::Data::new(Arc::clone(&task_manager)))
+            .wrap(actix_web::middleware::Logger::default())
     })
     .workers(16)
     .bind(("0.0.0.0", port))

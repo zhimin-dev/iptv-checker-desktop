@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// ── Module declarations ──
+// ── Module declarations (shared by both targets) ──
 mod common;
 mod config;
 mod r#const;
@@ -10,39 +10,43 @@ mod epg_mapping;
 mod live;
 mod search;
 mod utils;
-mod server_startup;
+pub mod server_startup;
 pub mod web;
 
+// ── Tauri-specific code (only compiled with --features desktop) ──
+
+#[cfg(feature = "desktop")]
 use std::net::TcpListener;
+#[cfg(feature = "desktop")]
 use std::process::Command;
+#[cfg(feature = "desktop")]
 use std::sync::Arc;
+#[cfg(feature = "desktop")]
 use std::sync::Mutex;
-use tauri::State;
+#[cfg(feature = "desktop")]
+use tauri::{Manager, State};
 
-// ── App State ──
-
+#[cfg(feature = "desktop")]
 struct AppState {
     server_port: Mutex<u16>,
     ffmpeg_path: Mutex<String>,
     ffprobe_path: Mutex<String>,
 }
 
-// ── Tauri Commands ──
-
-/// Returns the port the embedded actix-web server is listening on.
-/// Frontend calls this on startup to configure apiTaskService baseUrl.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_server_port(state: State<AppState>) -> u16 {
     *state.server_port.lock().unwrap()
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn now_mod() -> i32 {
-    1 // Always client/Tauri mode
+    1
 }
 
+#[cfg(feature = "desktop")]
 fn find_ffmpeg_path() -> Result<(String, String), String> {
-    // Try to find ffmpeg and ffprobe in PATH
     let ffmpeg_output = Command::new("which")
         .arg("ffmpeg")
         .output()
@@ -67,6 +71,7 @@ fn find_ffmpeg_path() -> Result<(String, String), String> {
     Ok((ffmpeg_path, ffprobe_path))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn check_ffmpeg(state: State<AppState>) -> Result<bool, String> {
     let ffmpeg_path = state.ffmpeg_path.lock().unwrap();
@@ -78,6 +83,7 @@ fn check_ffmpeg(state: State<AppState>) -> Result<bool, String> {
     Ok(output.status.success())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_video_info(url: String, state: State<AppState>) -> Result<serde_json::Value, String> {
     let ffprobe_path = state.ffprobe_path.lock().unwrap();
@@ -105,37 +111,35 @@ fn get_video_info(url: String, state: State<AppState>) -> Result<serde_json::Val
     }
 }
 
-// ── Tauri Entry Point ──
-
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Shared initialization (config files, folders, EPG, translate)
     server_startup::init_all();
     server_startup::init_console_log();
 
-    // Find ffmpeg/ffprobe paths
     let (ffmpeg_path, ffprobe_path) = find_ffmpeg_path().unwrap_or_default();
+
+    // Clone for the move closure
+    let ffmpeg_clone = ffmpeg_path.clone();
+    let ffprobe_clone = ffprobe_path.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            // ── Start embedded actix-web server on random port ──
+        .setup(move |app| {
             let listener = TcpListener::bind("127.0.0.1:0")
                 .expect("Failed to bind to random port");
             let port = listener.local_addr().unwrap().port();
 
             log::info!("Embedded server starting on 127.0.0.1:{}", port);
 
-            // Build the server (scheduler + task_manager)
-            use crate::web::TaskManager;
+            use crate::common::task::TaskManager;
             let task_manager = Arc::new(TaskManager {});
             let scheduler: Arc<Mutex<clokwerk::Scheduler>> =
                 Arc::new(Mutex::new(clokwerk::Scheduler::with_tz(chrono::Local)));
 
-            // Spawn scheduler thread
             use std::sync::atomic::{AtomicBool, Ordering};
             let shutdown_flag = Arc::new(AtomicBool::new(false));
             let sched_ref = Arc::clone(&scheduler);
@@ -150,7 +154,6 @@ pub fn run() {
                 }
             });
 
-            // Schedule periodic tasks
             {
                 use crate::config::{get_all_tasks, get_task};
                 use crate::search::init_search_data;
@@ -165,7 +168,6 @@ pub fn run() {
                         .enable_all().build().unwrap();
                     rt.block_on(async { let _ = crate::search::init_epg_data().await; });
                 });
-                // Check tasks every 30 seconds
                 s.every(clokwerk::TimeUnits::seconds(30)).run(move || {
                     if let Ok(tasks) = get_all_tasks() {
                         for (id, _) in tasks {
@@ -178,21 +180,23 @@ pub fn run() {
             }
 
             let server = actix_web::HttpServer::new(move || {
-                web::configure_app(scheduler.clone(), Arc::clone(&task_manager))
+                actix_web::App::new()
+                    .configure(web::configure_routes)
+                    .app_data(actix_web::web::Data::new(scheduler.clone()))
+                    .app_data(actix_web::web::Data::new(Arc::clone(&task_manager)))
+                    .wrap(actix_web::middleware::Logger::default())
             })
             .workers(16)
             .listen(listener)
             .expect("Failed to listen on TcpListener")
             .run();
 
-            // Store port in app state for frontend discovery
             app.manage(AppState {
                 server_port: Mutex::new(port),
-                ffmpeg_path: Mutex::new(ffmpeg_path.clone()),
-                ffprobe_path: Mutex::new(ffprobe_path.clone()),
+                ffmpeg_path: Mutex::new(ffmpeg_clone),
+                ffprobe_path: Mutex::new(ffprobe_clone),
             });
 
-            // Spawn the server in the background; Tauri lifecycle handles shutdown
             tauri::async_runtime::spawn(async move {
                 let _ = server.await;
             });
