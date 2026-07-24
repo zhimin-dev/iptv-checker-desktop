@@ -5,7 +5,7 @@ import ParseM3u from '../utils/utils'
 import { invoke } from '@tauri-apps/api/core'
 import i18n from "i18next";
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { overrideGlobalXHR } from 'tauri-xhr'
+
 import { LogicalSize } from '@tauri-apps/api/window';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { save } from '@tauri-apps/plugin-dialog';
