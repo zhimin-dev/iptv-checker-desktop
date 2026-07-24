@@ -4,7 +4,7 @@ export const MainContext = createContext();
 import ParseM3u from '../utils/utils'
 
 import i18n from "i18next";
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import { LogicalSize } from '@tauri-apps/api/window';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
@@ -200,7 +200,7 @@ export const MainContextProvider = function ({ children }) {
     }
 
     const initTitleBar = () => {
-        const appWindow = getCurrentWebviewWindow()
+        const appWindow = getCurrentWindow()
         console.log('[TitleBar] init, appWindow:', !!appWindow)
         initControlBar(appWindow)
     }

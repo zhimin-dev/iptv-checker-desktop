@@ -3,7 +3,7 @@ import { useContext, useState, useEffect, useRef } from "react"
 import VideoJS from './video'
 import { MainContext } from './../../context/main';
 import _Tabbar from './../layout/tabbar'
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalSize,LogicalPosition } from '@tauri-apps/api/window';
 
@@ -49,7 +49,7 @@ export default function Single(props) {
             setM3u8Link(paramsObject["url"])
             onloadM3u8Link(paramsObject["url"])
         }
-        const appWindow = getCurrentWebviewWindow()
+        const appWindow = getCurrentWindow()
         const unlistenPromise = listen('changeWatchUrl', (event) => {
             if (event.event === 'changeWatchUrl') {
                 setM3u8Link(event.payload.data.url)
@@ -106,7 +106,7 @@ export default function Single(props) {
         player.ready(function () {
             console.log(player.controlBar)
             var fullScreenButton = player.controlBar.fullscreenToggle;
-            const appWindow = getCurrentWebviewWindow()
+            const appWindow = getCurrentWindow()
 
             fullScreenButton.on('click', function () {
                 console.log("user click full")

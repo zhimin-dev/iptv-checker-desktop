@@ -39,7 +39,7 @@ import LiveTvIcon from '@mui/icons-material/LiveTv';
 import _package from './../../../package';
 import { useTranslation, initReactI18next } from "react-i18next";
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
+
 import Divider from '@mui/material/Divider';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
