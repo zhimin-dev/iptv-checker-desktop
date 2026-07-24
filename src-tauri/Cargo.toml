@@ -1,15 +1,13 @@
 [package]
 name = "app"
 version = "4.7.1"
-description = "iptv-checker tool"
+description = "iptv-checker desktop tool"
 authors = ["zmisgod"]
 license = "MIT"
 repository = ""
 default-run = "app"
 edition = "2021"
 rust-version = "1.60"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -18,21 +16,66 @@ tauri-build = { version = "2", features = [] }
 name = "iptv_checker_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = ["desktop"]
+desktop = [
+    "tauri",
+    "tauri-plugin-dialog",
+    "tauri-plugin-opener",
+    "tauri-plugin-http",
+    "tauri-plugin-os",
+    "tauri-plugin-fs",
+]
+custom-protocol = [ "tauri/custom-protocol" ]
+
+# ── Shared dependencies (both desktop and server) ──
+
 [dependencies]
+# Serde & JSON
 serde_json = "1"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "2", features = [ "macos-private-api", "unstable"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-http = {version = "2", features = ["unsafe-headers"] }
-tauri-plugin-os = "2"
-tauri-plugin-fs = "2"
 
-[features]
-# this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.
-# If you use cargo directly instead of tauri's cli you can use this feature flag to switch between tauri's `dev` and `build` modes.
-# DO NOT REMOVE!!
-custom-protocol = [ "tauri/custom-protocol" ]
+# Actix web
+actix-rt = "2.9.0"
+actix-web = { version = "4.4.1", default-features = false, features = ["macros", "compress-gzip", "compress-brotli"] }
+actix-files = "0.6.2"
+actix-multipart = "0.7.2"
+
+# Async & HTTP
+futures = "0.3"
+reqwest = { version = "0.12.12", features = ["json"] }
+tokio = { version = "1.35.0", features = ["full", "macros"] }
+
+# Date/time
+chrono = { version = "0.4.31", features = ["clock", "std"] }
+
+# CLI (used by server binary for arg parsing)
+clap = { version = "4.4.11", features = ["derive"] }
+
+# Utilities
+log = "0.4.20"
+url = "2.5.0"
+regex = "1"
+rand = "0.9.0"
+uuid = { version = "1.15.1", features = ["v4"] }
+md5 = "0.7.0"
+clokwerk = "0.4.0"
+lazy_static = "1.5.0"
+simplelog = "0.6"
+once_cell = "1.21.3"
+zip = "0.6"
+walkdir = "2.5"
+flate2 = "1.0"
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# ── Tauri (optional: excluded with --no-default-features) ──
+
+tauri = { version = "2", features = ["macos-private-api", "unstable"], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-http = { version = "2", features = ["unsafe-headers"], optional = true }
+tauri-plugin-os = { version = "2", optional = true }
+tauri-plugin-fs = { version = "2", optional = true }
 
 [profile.release.package.wry]
 debug = true
