@@ -16,6 +16,7 @@ export const useTask = () => {
 
 export const TaskProvider = ({ children }) => {
     const [nowMod, setNowMod] = useState(0);// 当前运行模式 0服务端模式 1客户端模式
+    const [serverBaseUrl, setServerBaseUrl] = useState(''); // Tauri embedded server base URL
     const [checkConcurrent, setCheckConcurrent] = useState(4)// 后台任务
     const [nowTaskId, setNowTaskId] = useState("")// 正在执行的任务id
     const [taskList, setTaskList] = useState([])// 正在执行的任务列表
@@ -492,14 +493,27 @@ export const TaskProvider = ({ children }) => {
     }
 
     useEffect(() => {
-        // loadFromLocalStorage()
-        // console.log("-----task start--", tasks, tasksRef.current)
+        async function discoverPort() {
+            try {
+                const port = await invoke('get_server_port');
+                setServerBaseUrl(`http://127.0.0.1:${port}`);
+                setNowMod(1); // Tauri/client mode
+                console.log('[Tasker] Server port discovered:', port);
+            } catch (e) {
+                // Not in Tauri — use Vite proxy (empty base)
+                console.log('[Tasker] Not in Tauri, using Vite proxy');
+            }
+        }
+        discoverPort();
+
+        loadFromLocalStorage()
+        console.log("-----task start--", tasks, tasksRef.current)
         // 开启worker
-        // startTask();
-        // // 清理 Worker
-        // return () => {
-        //     stopTask()
-        // };
+        startTask();
+        // 清理 Worker
+        return () => {
+            stopTask()
+        };
     }, []);
 
     const updateTaskListResultWithoutRef = (list) => {
@@ -620,7 +634,9 @@ export const TaskProvider = ({ children }) => {
             return url
         }
         let _timeout = parseInt(timeout, 10)
-        return '/fetch/m3u-body?url=' + url + "&timeout=" + (isNaN(_timeout) ? '-1' : _timeout)
+        const path = '/fetch/m3u-body?url=' + url + "&timeout=" + (isNaN(_timeout) ? '-1' : _timeout)
+        // In Tauri prod mode, prepend server base URL; in dev, Vite proxy handles it
+        return serverBaseUrl ? serverBaseUrl + path : path
     }
 
     const valid_m3u_file = (content) => {
@@ -705,6 +721,7 @@ export const TaskProvider = ({ children }) => {
     const value = {
         tasks,
         runningTasks,
+        serverBaseUrl,
         freshTaskList,
         updateTaskStatus
     };
