@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import axios from "axios"
 import ParseM3u from '../utils/utils'
+import { invoke } from '@tauri-apps/api/core'
 import { TaskStorageService } from '../services/taskStorageService';
 
 export const TaskContext = createContext();
@@ -494,14 +495,13 @@ export const TaskProvider = ({ children }) => {
     useEffect(() => {
         async function discoverPort() {
             try {
-                const { invoke } = await import('@tauri-apps/api/core');
                 const port = await invoke('get_server_port');
                 setServerBaseUrl(`http://127.0.0.1:${port}`);
                 setNowMod(1); // Tauri/client mode
                 console.log('[Tasker] Server port discovered:', port);
             } catch (e) {
                 // Not in Tauri — use Vite proxy (empty base)
-                console.log('[Tasker] Not in Tauri, using Vite proxy. Error:', e?.message || e);
+                console.log('[Tasker] Not in Tauri, using Vite proxy:', e?.message || e);
             }
         }
         discoverPort();

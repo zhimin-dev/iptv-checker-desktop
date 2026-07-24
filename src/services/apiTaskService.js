@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { invoke } from '@tauri-apps/api/core';
 
 export class ApiTaskService {
     constructor() {
@@ -11,16 +12,14 @@ export class ApiTaskService {
         if (!this.portReady) {
             this.portReady = (async () => {
                 try {
-                    // Dynamic import: works in Tauri webview, fails gracefully otherwise
-                    const { invoke } = await import('@tauri-apps/api/core');
                     const port = await invoke('get_server_port');
                     this.baseUrl = `http://127.0.0.1:${port}`;
                     console.log('[ApiTaskService] Server port discovered:', port);
                 } catch (e) {
-                    // Fallback: not running in Tauri (dev mode with separate server, or regular browser)
                     this.baseUrl = '';
-                    console.warn('[ApiTaskService] Tauri invoke not available:', e?.message || e);
-                    console.log('[ApiTaskService] Falling back to proxy mode (baseUrl empty)');
+                    console.error('[ApiTaskService] invoke get_server_port FAILED:', e);
+                    console.error('[ApiTaskService] Error type:', typeof e, '| keys:', Object.keys(e || {}));
+                    console.error('[ApiTaskService] ALL API CALLS WILL USE PROXY (port 5173 → 8089)');
                 }
             })();
         }
