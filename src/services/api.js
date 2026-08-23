@@ -268,12 +268,14 @@ export async function setCacheConfig(base, ttlHours) {
 }
 
 // 分片参数（分片时长/保留分片数）统一由服务端后台配置，桌面端不再下发
-export async function startRelay(base, { url, headers }) {
+// 引擎：http（纯 HTTP 下载 TS 直传，默认）或 ffmpeg（转码切片，探测失败时服务端自动回退）
+export async function startRelay(base, { url, headers, mode }) {
   const resp = await axios.post(
     base + '/api/player/relay/start',
     {
       url,
       headers: headers || {},
+      mode: mode || 'http',
     },
     { timeout: 20000 }
   )

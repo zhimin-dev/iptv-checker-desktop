@@ -13,6 +13,7 @@ import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import Alert from '@mui/material/Alert'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import SettingsIcon from '@mui/icons-material/Settings'
 import SearchIcon from '@mui/icons-material/Search'
 import TvIcon from '@mui/icons-material/Tv'
@@ -56,8 +57,16 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
   const FAV_PAGE_SIZE = 60
   const channelsRef = useRef(null)
   channelsRef.current = channels
+  const favRef = useRef([])
+  favRef.current = favourites
   const showSnapshotsRef = useRef(showSnapshots)
   showSnapshotsRef.current = showSnapshots
+  // 最近一次成功刷新画面的时间（用于自动刷新到点判断）
+  const lastSnapRefreshRef = useRef(0)
+  // 防止并发抓帧
+  const snapLoadingRef = useRef(false)
+  // 始终指向最新的 loadSnapshots（避免定时器捕获旧闭包）
+  const loadSnapshotsRef = useRef(null)
 
   /** 点击频道：把同名频道的所有源一起带给播放页（自动切换备用源），并记录搜索历史 */
   const handleOpenChannel = (c) => {
@@ -102,12 +111,10 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
       setFavPage(0)
       setFavTotal(favData.total || 0)
       // 已检查无数据但收藏有数据时，默认展示收藏 tab
-      setChannels((prev) => {
-        if ((prev === null || prev.length === 0) && (favData.list || []).length > 0) {
-          setTab('fav')
-        }
-        return prev
-      })
+      const ch = channelsRef.current
+      if ((ch === null || ch.length === 0) && (favData.list || []).length > 0) {
+        setTab('fav')
+      }
     } catch (e) {
       console.log('favourites load failed', e)
     }
@@ -168,27 +175,34 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
     return map
   }
 
-  /** 抓取全部频道画面（不只当前窗口显示的频道） */
+  /** 抓取全部频道画面（不只当前窗口显示的频道）。用 ref 读取最新频道列表，避免定时器旧闭包问题 */
   const loadSnapshots = async (force) => {
-    if (!channels || channels.length === 0) return
+    const list = channelsRef.current
+    if (!list || list.length === 0) return
+    if (snapLoadingRef.current) return
+    snapLoadingRef.current = true
     setSnapshotLoading(true)
     try {
-      const map = await fetchSnapChunks(channels, !!force, false)
+      const map = await fetchSnapChunks(list, !!force, false)
       setSnapshots((prev) => ({ ...prev, ...map }))
       // 刷新后递增版本号，附加到图片 URL 上强制浏览器重新加载
       setSnapVersion((v) => v + 1)
+      // 记录成功刷新时间，作为自动刷新的计时起点
+      lastSnapRefreshRef.current = Date.now()
     } catch (e) {
       console.log('snapshots failed', e)
     } finally {
       setSnapshotLoading(false)
+      snapLoadingRef.current = false
     }
   }
 
   /** 刷新页面后立即展示上次抓取的画面（不重新抓帧），后台再异步补抓 */
   const loadExistingSnapshots = async () => {
-    if (!channels || channels.length === 0) return
+    const list = channelsRef.current
+    if (!list || list.length === 0) return
     try {
-      const map = await fetchSnapChunks(channels, false, true)
+      const map = await fetchSnapChunks(list, false, true)
       setSnapshots((prev) => ({ ...prev, ...map }))
       setSnapVersion((v) => v + 1)
     } catch (e) {
@@ -198,10 +212,11 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
 
   /** 已收藏频道画面（手动刷新按钮传 force） */
   const loadFavSnapshots = async (force) => {
-    if (!favourites || favourites.length === 0) return
+    const list = favRef.current
+    if (!list || list.length === 0) return
     setFavSnapLoading(true)
     try {
-      const map = await fetchSnapChunks(favourites, !!force, false)
+      const map = await fetchSnapChunks(list, !!force, false)
       setFavSnapshots((prev) => ({ ...prev, ...map }))
       setSnapVersion((v) => v + 1)
     } catch (e) {
@@ -238,14 +253,35 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSnapshots, favourites.length])
 
-  // 按设定间隔自动刷新全部频道画面（5/10/30/60 分钟）
+  // 始终让 loadSnapshotsRef 指向最新实现
+  loadSnapshotsRef.current = loadSnapshots
+
+  // 按设定间隔自动刷新全部频道画面（5/10/30/60 分钟）。
+  // 采用「记录上次成功刷新时间 + 每分钟检查一次」而不是裸 setInterval：
+  // 1) 定时器闭包不再捕获旧频道列表（用 ref 读最新值）；
+  // 2) 窗口最小化/后台时 WebView 可能节流或冻结定时器，恢复可见后立即补刷新。
   useEffect(() => {
     if (!showSnapshots) return
     const ms = Math.max(1, snapInterval) * 60 * 1000
-    const timer = setInterval(() => {
-      if (showSnapshotsRef.current) loadSnapshots(true)
-    }, ms)
-    return () => clearInterval(timer)
+    const check = () => {
+      if (!showSnapshotsRef.current) return
+      if (Date.now() - lastSnapRefreshRef.current >= ms) {
+        loadSnapshotsRef.current && loadSnapshotsRef.current(true)
+      }
+    }
+    const timer = setInterval(check, 60000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        // 恢复可见：立即重算画面时间角标并检查是否到点补刷新
+        setTick((v) => v + 1)
+        check()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSnapshots, snapInterval])
 
@@ -300,6 +336,20 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
           <IconButton onClick={() => load(true)} title={t('refresh')} disabled={refreshing}>
             {refreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
           </IconButton>
+          {/* 右上角：频道画面单独刷新（当前 tab 是收藏时刷新收藏画面） */}
+          {showSnapshots ? (
+            <IconButton
+              onClick={() => (tab === 'fav' ? loadFavSnapshots(true) : loadSnapshots(true))}
+              title={t('refreshSnapshots')}
+              disabled={tab === 'fav' ? favSnapLoading : snapshotLoading}
+            >
+              {(tab === 'fav' ? favSnapLoading : snapshotLoading) ? (
+                <CircularProgress size={20} />
+              ) : (
+                <AddPhotoAlternateIcon />
+              )}
+            </IconButton>
+          ) : null}
           <IconButton onClick={onOpenSettings} title={t('settings')}>
             <SettingsIcon />
           </IconButton>
@@ -347,19 +397,8 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
 
             {channels && channels.length > 0 ? (
               <>
-                {/* 刷新画面按钮 + 分组筛选放在同一行；分组很多时自动上下换行，不横向滑动 */}
+                {/* 分组筛选；分组很多时自动上下换行，不横向滑动（画面刷新按钮已移到右上角图标） */}
                 <Box sx={{ mt: 2, mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  {showSnapshots ? (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={snapshotLoading ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
-                      disabled={snapshotLoading}
-                      onClick={() => loadSnapshots(true)}
-                    >
-                      {t('refreshSnapshots')}
-                    </Button>
-                  ) : null}
                   {cacheSavedAt ? (
                     <Typography variant="caption" color="text.secondary">
                       {t('cachedAt')} · {t('cacheSavedAt', { t: new Date(cacheSavedAt).toLocaleString() })}
@@ -408,19 +447,6 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
           </>
         ) : (
           <>
-            {showSnapshots && favourites.length > 0 ? (
-              <Box sx={{ mt: 2, mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={favSnapLoading ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
-                  disabled={favSnapLoading}
-                  onClick={() => loadFavSnapshots(true)}
-                >
-                  {t('refreshSnapshots')}
-                </Button>
-              </Box>
-            ) : null}
             {favourites.length === 0 && !favLoadingMore ? (
               <Box sx={{ textAlign: 'center', py: 6 }}>
                 <Typography variant="body1" color="text.secondary">
