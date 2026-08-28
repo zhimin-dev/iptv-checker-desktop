@@ -7,6 +7,8 @@ import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import CircularProgress from '@mui/material/CircularProgress'
+import Select from '@mui/material/Select'
+import MenuItem from '@mui/material/MenuItem'
 import Alert from '@mui/material/Alert'
 import Dialog from '@mui/material/Dialog'
 import DialogTitle from '@mui/material/DialogTitle'
@@ -32,7 +34,9 @@ import {
   addFavourite,
   buildProxyUrl,
   checkFavourite,
+  describeError,
   getEpg,
+  getVariants,
   recordPlay,
   relayHeartbeat,
   relayStatus,
@@ -51,13 +55,16 @@ function progTitle(p) {
   return (zh || titles[0] || {}).value || ''
 }
 
-export default function PlayerScreen({ server, channel, onBack, onSwitchChannel }) {
+export default function PlayerScreen({ server, channel, notifyError, onBack, onSwitchChannel }) {
   const { t } = useT()
   // 同名频道的多个源：播放失败时自动尝试下一个
   const sources = channel.alternates && channel.alternates.length > 0 ? channel.alternates : [channel]
   const [sourceIndex, setSourceIndex] = useState(0)
   const current = sources[Math.min(sourceIndex, sources.length - 1)]
-  const directUrl = buildProxyUrl(server, current.url, current.user_agent)
+  // 多分辨率变体：variantUrl 为空 = 自动（直接用源地址）
+  const [variants, setVariants] = useState([])
+  const [variantUrl, setVariantUrl] = useState('')
+  const directUrl = buildProxyUrl(server, variantUrl || current.url, current.user_agent)
   const [sourceUrl, setSourceUrl] = useState(directUrl)
   const [playError, setPlayError] = useState(false)
   const [showUrlDialog, setShowUrlDialog] = useState(false)
@@ -108,7 +115,7 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
     stopCurrentRelay()
   }, [channel.id])
 
-  const enableRelay = async () => {
+  const enableRelay = async (urlOverride) => {
     if (relayStateRef.current === 'starting' || relayStateRef.current === 'on') return
     setStallHint(false)
     setPlayError(false)
@@ -118,7 +125,7 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
       const headers = {}
       if (current.user_agent) headers['User-Agent'] = current.user_agent
       const data = await startRelay(server, {
-        url: current.url,
+        url: urlOverride || current.url,
         headers,
       })
       sidRef.current = data.sid
@@ -152,6 +159,7 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
       const msg = (e.response && e.response.data && e.response.data.msg) || e.message || ''
       setRelayError(msg)
       setRelayState('error')
+      if (notifyError) notifyError(t('relayFailed') + ' · ' + describeError(e))
       await stopCurrentRelay()
     }
   }
@@ -237,6 +245,7 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
       }
     } catch (e) {
       console.log('toggle favourite failed', e)
+      if (notifyError) notifyError(describeError(e))
     }
   }
 
@@ -246,6 +255,16 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
   useEffect(() => {
     reportedRef.current = ''
   }, [current.url])
+
+  // 查询当前源的多分辨率变体列表（非多码率源返回空）
+  useEffect(() => {
+    setVariants([])
+    setVariantUrl('')
+    if (!current.url) return
+    getVariants(server, current.url, current.user_agent)
+      .then((d) => setVariants((d && d.list) || []))
+      .catch(() => {})
+  }, [current.url, server])
 
   const onPlaying = useCallback(() => {
     const key = current.url
@@ -302,6 +321,27 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
       setSourceUrl(directUrl)
     }
   }, [directUrl, relayState])
+
+  /** 播放栏流畅模式开关：开/关切换 */
+  const handleRelayToggle = () => {
+    if (relayStateRef.current === 'on' || relayStateRef.current === 'starting') {
+      disableRelay()
+    } else {
+      enableRelay()
+    }
+  }
+
+  /** 切换分辨率：直连模式直接换源；流畅模式以选中分辨率重新启动中继 */
+  const handleVariantChange = (url) => {
+    setVariantUrl(url)
+    const wasRelay = relayStateRef.current === 'on' || relayStateRef.current === 'starting'
+    if (wasRelay) {
+      relayStateRef.current = 'off'
+      setRelayState('off')
+      setRelayInfo(null)
+      stopCurrentRelay().then(() => enableRelay(url))
+    }
+  }
 
   const handleBack = () => {
     stopCurrentRelay()
@@ -384,7 +424,28 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
       </AppBar>
 
       <Box sx={{ position: 'relative', flex: 1, minHeight: 0, bgcolor: '#000' }}>
-        <VideoPlayer src={sourceUrl} onStall={onStall} onError={handlePlayError} onPlaying={onPlaying} />
+        <VideoPlayer
+          src={sourceUrl}
+          onStall={onStall}
+          onError={handlePlayError}
+          onPlaying={onPlaying}
+          quality={{
+            variants,
+            current: variantUrl,
+            autoLabel: t('qualityAuto'),
+            onChange: handleVariantChange,
+          }}
+          relay={{
+            state: relayState,
+            text:
+              relayState === 'starting'
+                ? t('relayShortStarting')
+                : relayState === 'on'
+                  ? t('relayShortOff')
+                  : t('relayShortOn'),
+            onClick: handleRelayToggle,
+          }}
+        />
 
         {relayState === 'starting' ? (
           <Box
@@ -476,26 +537,6 @@ export default function PlayerScreen({ server, channel, onBack, onSwitchChannel 
         ) : null}
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          {relayState === 'off' || relayState === 'error' ? (
-            <Button
-              variant="contained"
-              size="medium"
-              startIcon={<SpeedIcon />}
-              onClick={enableRelay}
-              disabled={relayState === 'starting'}
-            >
-              {t('switchToRelay')}
-            </Button>
-          ) : relayState === 'on' ? (
-            <Button variant="outlined" size="medium" onClick={disableRelay}>
-              {t('switchToDirect')}
-            </Button>
-          ) : (
-            <Button variant="contained" size="medium" disabled startIcon={<CircularProgress size={16} />}>
-              {t('relayStarting')}
-            </Button>
-          )}
-
           {relayState === 'on' && relayInfo ? (
             <Typography variant="body2" color="success.main">
               {t('relaySegments', { n: relayInfo.segmentCount })} · {t('relayDelay', { s: delaySecs })}

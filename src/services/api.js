@@ -4,6 +4,25 @@ const LS_SERVER = 'iptv-player.server'
 
 // ---------- 服务端地址 ----------
 
+/** 把 axios 错误转成可展示的简短描述（含请求路径与 HTTP 状态） */
+export function describeError(e) {
+  if (e && e.response) {
+    const status = e.response.status
+    let msg = ''
+    const d = e.response.data
+    if (d && typeof d === 'object' && d.msg) msg = String(d.msg)
+    else if (typeof d === 'string') msg = d.slice(0, 200)
+    const url = (e.config && e.config.url) || ''
+    const path = url.replace(/^https?:\/\/[^/]+/, '')
+    return path + ' → HTTP ' + status + (msg ? ' · ' + msg : '')
+  }
+  if (e && e.code === 'ECONNABORTED') {
+    const url = (e.config && e.config.url) || ''
+    return url.replace(/^https?:\/\/[^/]+/, '') + ' timeout'
+  }
+  return (e && e.message) || String(e)
+}
+
 export function normalizeServerUrl(input) {
   let url = (input || '').trim()
   if (!url) return ''
@@ -60,6 +79,17 @@ export async function getSearchHistory(base, keyword, limit) {
   const resp = await axios.get(base + '/api/player/search-history', {
     params: { keyword: keyword || '', limit: limit || 20 },
     timeout: 10000,
+  })
+  return resp.data
+}
+
+// ---------- 多分辨率变体 ----------
+
+/** 查询频道 m3u8 的多码率变体列表（非 master playlist 时返回空列表） */
+export async function getVariants(base, url, ua) {
+  const resp = await axios.get(base + '/api/player/variants', {
+    params: { url, ua: ua || undefined },
+    timeout: 25000,
   })
   return resp.data
 }

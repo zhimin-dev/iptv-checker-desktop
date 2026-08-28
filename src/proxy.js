@@ -1,5 +1,8 @@
-// 桌面端代理：配置代理后，客户端所有 HTTP 请求（接口 + 播放 + 快照）
-// 均通过 tauri http 插件转发，支持 http/https/socks5 代理。
+// 桌面端网络层：
+// - 本机/内网地址（localhost、127.*、10.*、192.168.*、172.16-31.*、主机名）永远直连，
+//   绝不走系统代理或应用代理 —— 解决系统代理（如 Clash）把 127.0.0.1 转发到远端节点导致 502 的问题；
+// - 外网地址：配置了应用代理时走应用代理（tauri http 插件），否则走系统网络栈（系统代理照常生效）；
+// - 在 Tauri 环境里，axios 与全局 XHR 统一换成下面的实现（网页预览模式不受影响）。
 
 import axios from 'axios'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
@@ -20,13 +23,46 @@ export function hasProxy() {
   return !!getProxyUrl()
 }
 
-/** 经 tauri http 插件（带代理）发请求，返回 Web Response */
-export async function proxyFetch(url, options) {
+/** 是否本机/内网地址：这些地址一律直连，不经过任何代理 */
+export function isLocalHost(url) {
+  try {
+    const u = new URL(url, 'http://127.0.0.1')
+    const host = u.hostname.toLowerCase()
+    if (host === 'localhost' || host === '::1') return true
+    if (/^127\./.test(host)) return true
+    if (/^10\./.test(host)) return true
+    if (/^192\.168\./.test(host)) return true
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true
+    if (host === '0.0.0.0') return true
+    if (!host.includes('.')) return true // <local>：无点主机名
+    return false
+  } catch (e) {
+    return false
+  }
+}
+
+/** 根据地址选择网络路径：
+ *  - 本机/内网 → tauri 插件直连（reqwest 默认不读系统代理）
+ *  - 外网 + 应用代理 → tauri 插件走代理
+ *  - 外网 + 无代理 → 浏览器 fetch（系统代理照常生效）
+ */
+async function smartFetch(url, options) {
+  const method = (options && options.method) || 'GET'
+  const headers = (options && options.headers) || undefined
+  const body = (options && options.body) || undefined
+  if (isLocalHost(url)) {
+    return tauriFetch(url, { method, headers, body })
+  }
   const proxy = getProxyUrl()
-  return tauriFetch(url, {
-    ...options,
-    proxy: proxy ? { all: proxy } : undefined,
-  })
+  if (proxy) {
+    return tauriFetch(url, { method, headers, body, proxy: { all: proxy } })
+  }
+  return fetch(url, { method, headers, body, signal: AbortSignal.timeout((options && options.timeout) || 30000) })
+}
+
+/** 经网络层发请求，返回 Web Response（供 fetchAsBlobUrl 等使用） */
+export async function proxyFetch(url, options) {
+  return smartFetch(url, options)
 }
 
 /** 序列化 axios params 为查询字符串（自定义 adapter 不会自动拼参数） */
@@ -53,7 +89,7 @@ function plainHeaders(configHeaders) {
   return out
 }
 
-/** axios 自定义 adapter：代理模式下所有 API 请求走插件；插件失败时直连兜底 */
+/** axios 自定义 adapter：本机直连 / 外网按应用代理设置走插件或系统网络 */
 async function proxyAxiosAdapter(config) {
   const url = buildQueryString(config.url, config.params)
   const method = (config.method || 'get').toUpperCase()
@@ -63,18 +99,7 @@ async function proxyAxiosAdapter(config) {
       ? config.data
       : JSON.stringify(config.data)
     : undefined
-  let resp
-  try {
-    resp = await proxyFetch(url, { method, headers, body })
-  } catch (e) {
-    // 插件请求失败（作用域受限 / 代理不可用等）时，退回系统直连再试一次
-    resp = await fetch(url, {
-      method,
-      headers,
-      body,
-      signal: AbortSignal.timeout(config.timeout || 30000),
-    })
-  }
+  const resp = await smartFetch(url, { method, headers, body, timeout: config.timeout || 30000 })
   const ct = (resp.headers.get('content-type') || '').toLowerCase()
   let data
   if (ct.includes('json')) data = await resp.json()
@@ -94,7 +119,7 @@ async function proxyAxiosAdapter(config) {
   return response
 }
 
-/** 最小 XHR 实现（供 video.js/VHS 使用），请求经代理 */
+/** 最小 XHR 实现（供 video.js/VHS 使用），请求经网络层 */
 class ProxyXHR {
   constructor() {
     this.readyState = 0
@@ -136,7 +161,7 @@ class ProxyXHR {
     const self = this
     ;(async () => {
       try {
-        const resp = await proxyFetch(this._url, {
+        const resp = await smartFetch(this._url, {
           method: this._method,
           headers: this._headers,
           body: body || undefined,
@@ -172,10 +197,10 @@ class ProxyXHR {
   }
 }
 
-/** 代理模式下，通过 fetch 获取图片并转 blob URL（img 标签不走 XHR，需手动加载） */
+/** 通过网络层获取图片并转 blob URL（本机地址直连，不受系统代理影响） */
 export async function fetchAsBlobUrl(url) {
   try {
-    const resp = await proxyFetch(url, { method: 'GET' })
+    const resp = await smartFetch(url, { method: 'GET' })
     if (!resp.ok) return ''
     const blob = await resp.blob()
     return URL.createObjectURL(blob)
@@ -184,10 +209,14 @@ export async function fetchAsBlobUrl(url) {
   }
 }
 
-/** 应用代理设置：有代理时覆写 axios adapter 与全局 XHR */
-export function setupProxy() {
-  if (!hasProxy()) return
+/** 应用网络层：Tauri 环境里始终覆写 axios adapter 与全局 XHR */
+export function setupNetwork() {
   if (!window.__TAURI_INTERNALS__) return
   axios.defaults.adapter = proxyAxiosAdapter
   window.XMLHttpRequest = ProxyXHR
+}
+
+/** 兼容旧名字 */
+export function setupProxy() {
+  setupNetwork()
 }

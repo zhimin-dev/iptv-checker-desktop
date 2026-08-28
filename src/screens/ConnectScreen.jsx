@@ -6,10 +6,12 @@ import TextField from '@mui/material/TextField'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import Alert from '@mui/material/Alert'
+import IconButton from '@mui/material/IconButton'
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import { useT } from '../i18n'
-import { normalizeServerUrl, testServer } from '../services/api'
+import { describeError, normalizeServerUrl, testServer } from '../services/api'
 
-export default function ConnectScreen({ onConnected }) {
+export default function ConnectScreen({ notifyError, onConnected, onOpenSettings }) {
   const { t } = useT()
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -28,6 +30,7 @@ export default function ConnectScreen({ onConnected }) {
       onConnected(url)
     } catch (e) {
       setError(true)
+      if (notifyError) notifyError(t('connectFailed') + ' · ' + describeError(e))
     } finally {
       setBusy(false)
     }
@@ -37,6 +40,7 @@ export default function ConnectScreen({ onConnected }) {
     <Box
       sx={{
         flex: 1,
+        position: 'relative',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -44,6 +48,14 @@ export default function ConnectScreen({ onConnected }) {
         minHeight: 0,
       }}
     >
+      {/* 右上角：设置入口（可关闭代理等） */}
+      <IconButton
+        onClick={onOpenSettings}
+        title={t('settings')}
+        sx={{ position: 'absolute', top: 8, right: 8 }}
+      >
+        <SettingsOutlinedIcon />
+      </IconButton>
       <Paper
         elevation={3}
         sx={{

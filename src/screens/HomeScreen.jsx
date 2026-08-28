@@ -19,15 +19,15 @@ import SearchIcon from '@mui/icons-material/Search'
 import TvIcon from '@mui/icons-material/Tv'
 import FavoriteIcon from '@mui/icons-material/Favorite'
 import { useT } from '../i18n'
-import { getCachedChannels, getChannels, getFavourites, getSnapInterval, getSnapshots, getSnapshotsConfig, recordSearch, removeFavourite, setCachedChannels } from '../services/api'
+import { describeError, getCachedChannels, getChannels, getFavourites, getSnapInterval, getSnapshots, getSnapshotsConfig, recordSearch, removeFavourite, setCachedChannels } from '../services/api'
 import CustomPlayButton from '../components/CustomPlayButton'
-import { fetchAsBlobUrl, hasProxy } from '../proxy'
+import { fetchAsBlobUrl, isLocalHost } from '../proxy'
 
 const GRID_PAGE = 60
 const SNAP_CHUNK = 24
 const CARD_WIDTH = 300
 
-export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOpenSettings, onOpenSearch }) {
+export default function HomeScreen({ server, notifyError, onOpenChannel, onChangeServer, onOpenSettings, onOpenSearch }) {
   const { t } = useT()
   const [tab, setTab] = useState('checked')
   const [channels, setChannels] = useState(null)
@@ -65,14 +65,15 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
   const lastSnapRefreshRef = useRef(0)
   // 防止并发抓帧
   const snapLoadingRef = useRef(false)
-  // 始终指向最新的 loadSnapshots（避免定时器捕获旧闭包）
+  // 始终指向最新的 loadSnapshots / loadFavSnapshots（避免定时器捕获旧闭包）
   const loadSnapshotsRef = useRef(null)
+  const loadFavSnapshotsRef = useRef(null)
 
-  /** 点击频道：把同名频道的所有源一起带给播放页（自动切换备用源），并记录搜索历史 */
+  /** 点击频道：把点击的频道放在首位，其余同名源作为备用（自动切换），并记录搜索历史 */
   const handleOpenChannel = (c) => {
     recordSearch(server, c.name)
-    const sameName = (channels || []).filter((x) => x.name === c.name)
-    onOpenChannel(sameName.length > 0 ? { ...c, alternates: sameName } : c)
+    const sameName = (channels || []).filter((x) => x.name === c.name && x.url !== c.url)
+    onOpenChannel({ ...c, alternates: [c, ...sameName] })
   }
 
   /** 加载：已检查频道（缓存优先）+ 已收藏频道 */
@@ -93,6 +94,7 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
       setCacheSavedAt(0)
       setCachedChannels(data.list || [], server, 'checked')
     } catch (e) {
+      notifyError(t('loadFailed') + ' · ' + describeError(e))
       if (!channelsRef.current) {
         const msg = (e.response && e.response.data && e.response.data.msg) || e.message || ''
         setError(msg)
@@ -117,6 +119,7 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
       }
     } catch (e) {
       console.log('favourites load failed', e)
+      notifyError(t('loadFailed') + ' · ' + describeError(e))
     }
   }
 
@@ -191,6 +194,7 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
       lastSnapRefreshRef.current = Date.now()
     } catch (e) {
       console.log('snapshots failed', e)
+      notifyError(describeError(e))
     } finally {
       setSnapshotLoading(false)
       snapLoadingRef.current = false
@@ -253,10 +257,11 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSnapshots, favourites.length])
 
-  // 始终让 loadSnapshotsRef 指向最新实现
+  // 始终让 ref 指向最新实现
   loadSnapshotsRef.current = loadSnapshots
+  loadFavSnapshotsRef.current = loadFavSnapshots
 
-  // 按设定间隔自动刷新全部频道画面（5/10/30/60 分钟）。
+  // 按设定间隔自动刷新画面（已检查 + 已收藏，5/10/30/60 分钟）。
   // 采用「记录上次成功刷新时间 + 每分钟检查一次」而不是裸 setInterval：
   // 1) 定时器闭包不再捕获旧频道列表（用 ref 读最新值）；
   // 2) 窗口最小化/后台时 WebView 可能节流或冻结定时器，恢复可见后立即补刷新。
@@ -265,9 +270,29 @@ export default function HomeScreen({ server, onOpenChannel, onChangeServer, onOp
     const ms = Math.max(1, snapInterval) * 60 * 1000
     const check = () => {
       if (!showSnapshotsRef.current) return
-      if (Date.now() - lastSnapRefreshRef.current >= ms) {
-        loadSnapshotsRef.current && loadSnapshotsRef.current(true)
+      if (Date.now() - lastSnapRefreshRef.current < ms) return
+      const jobs = []
+      let anyWork = false
+      const checked = channelsRef.current
+      if (checked && checked.length > 0) {
+        anyWork = true
+        jobs.push(loadSnapshotsRef.current ? loadSnapshotsRef.current(true) : Promise.resolve())
       }
+      const favs = favRef.current
+      if (favs && favs.length > 0) {
+        anyWork = true
+        jobs.push(loadFavSnapshotsRef.current ? loadFavSnapshotsRef.current(true) : Promise.resolve())
+      }
+      if (!anyWork) {
+        // 没有可刷新的频道时也推进计时起点，避免每分钟空转
+        lastSnapRefreshRef.current = Date.now()
+        return
+      }
+      Promise.allSettled(jobs).then((results) => {
+        if (results.some((r) => r.status === 'fulfilled')) {
+          lastSnapRefreshRef.current = Date.now()
+        }
+      })
     }
     const timer = setInterval(check, 60000)
     const onVisible = () => {
@@ -528,14 +553,9 @@ function ChannelCard({ channel, snapshotMeta, server, onClick, action, version, 
         }}
       >
         {snapshot ? (
-          <SnapshotImage src={server + snapshot + '?v=' + (version || 0)} alt={channel.name} useBlob={hasProxy()} />
+          <SnapshotImage src={server + snapshot + '?v=' + (version || 0)} alt={channel.name} useBlob={!!window.__TAURI_INTERNALS__} />
         ) : channel.logo ? (
-          <img
-            src={channel.logo}
-            alt={channel.name}
-            loading="lazy"
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-          />
+          <LogoImage src={channel.logo} server={server} alt={channel.name} />
         ) : (
           <TvIcon sx={{ color: 'grey.600', fontSize: 36 }} />
         )}
@@ -581,7 +601,37 @@ function ChannelCard({ channel, snapshotMeta, server, onClick, action, version, 
   )
 }
 
-/** 快照图片：代理模式下用 fetch 拉取转 blob URL */
+/** 频道图标：本机/内网地址（含服务端相对路径）经网络层拉取转 blob URL，外网地址直接用 img */
+function LogoImage({ src, server, alt }) {
+  const tauri = !!window.__TAURI_INTERNALS__
+  const [blobUrl, setBlobUrl] = useState('')
+  const full = src && src.startsWith('/') ? server + src : src
+  useEffect(() => {
+    if (!tauri || !full) return
+    if (!isLocalHost(full)) return
+    let cancelled = false
+    fetchAsBlobUrl(full).then((u) => {
+      if (!cancelled) setBlobUrl(u)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [full, tauri])
+  const finalSrc = tauri && blobUrl ? blobUrl : full
+  if (!finalSrc) {
+    return <TvIcon sx={{ color: 'grey.600', fontSize: 36 }} />
+  }
+  return (
+    <img
+      src={finalSrc}
+      alt={alt}
+      loading="lazy"
+      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+    />
+  )
+}
+
+/** 快照图片：Tauri 环境下用网络层拉取转 blob URL（本机地址直连，不受系统代理影响） */
 function SnapshotImage({ src, alt, useBlob }) {
   const [blobUrl, setBlobUrl] = useState('')
   useEffect(() => {

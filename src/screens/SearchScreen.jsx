@@ -32,6 +32,7 @@ import { useT } from '../i18n'
 import {
   addFavourite,
   deletePlayHistory,
+  describeError,
   getCachedChannels,
   getChannels,
   getPlayHistory,
@@ -43,7 +44,7 @@ import CustomPlayButton from '../components/CustomPlayButton'
 const CAT_PAGE = 30
 const LIST_PAGE = 50
 
-export default function SearchScreen({ server, onOpenChannel, onBack }) {
+export default function SearchScreen({ server, notifyError, onOpenChannel, onBack }) {
   const { t } = useT()
   // 数据源：all=全部 / like=喜欢 / checked=已检查 / history=播放历史
   const [source, setSource] = useState('all')
@@ -83,6 +84,7 @@ export default function SearchScreen({ server, onOpenChannel, onBack }) {
     } catch (e) {
       const msg = (e.response && e.response.data && e.response.data.msg) || e.message || ''
       setError(msg)
+      if (notifyError) notifyError(t('loadFailed') + ' · ' + describeError(e))
     } finally {
       setLoading(false)
     }
@@ -115,13 +117,13 @@ export default function SearchScreen({ server, onOpenChannel, onBack }) {
     onOpenChannel(c)
   }
 
-  /** 从分类详情进入播放：带上该分类的完整列表，方便快速切换 */
+  /** 从分类详情进入播放：点击的频道放首位，其余同名源作备用；带上该分类完整列表方便快速切换 */
   const handleOpenFromCategory = (c) => {
     recordSearch(server, c.name)
-    const sameName = groupChannels.filter((x) => x.name === c.name)
+    const sameName = groupChannels.filter((x) => x.name === c.name && x.url !== c.url)
     onOpenChannel({
       ...c,
-      alternates: sameName.length > 0 ? sameName : undefined,
+      alternates: [c, ...sameName],
       categoryList: groupChannels,
     })
   }

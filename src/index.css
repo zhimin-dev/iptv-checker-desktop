@@ -10,3 +10,15 @@ body {
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
 }
+
+/* 播放栏内自定义按钮：清晰度 / 流畅模式 */
+.vjs-control.vjs-visible-text {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 3em;
+}
+.vjs-quality-menu .vjs-menu-content {
+  min-width: 96px;
+  font-size: 12px;
+}

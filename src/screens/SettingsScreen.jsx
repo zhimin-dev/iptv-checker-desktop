@@ -17,6 +17,7 @@ import { getProxyUrl, setProxyUrl } from '../proxy'
 import {
   clearChannelsCache,
   clearLocalChannelsCache,
+  describeError,
   getCacheConfig,
   getSnapInterval,
   normalizeServerUrl,
@@ -25,7 +26,7 @@ import {
   testServer,
 } from '../services/api'
 
-export default function SettingsScreen({ server, onUpdateServer, onBack }) {
+export default function SettingsScreen({ server, notifyError, onUpdateServer, onBack }) {
   const { t, lang, changeLang } = useT()
   const [urlInput, setUrlInput] = useState(server)
   const [saving, setSaving] = useState(false)
@@ -65,6 +66,7 @@ export default function SettingsScreen({ server, onUpdateServer, onBack }) {
       flashSaved()
     } catch (e) {
       setError(true)
+      if (notifyError) notifyError(t('connectFailed') + ' · ' + describeError(e))
     } finally {
       setSaving(false)
     }
@@ -72,6 +74,13 @@ export default function SettingsScreen({ server, onUpdateServer, onBack }) {
 
   const handleSaveProxy = () => {
     setProxyUrl(proxyInput)
+    flashSaved()
+  }
+
+  /** 关闭代理：清空代理配置（本机/内网地址本来就直连，外网恢复系统直连） */
+  const handleDisableProxy = () => {
+    setProxyInput('')
+    setProxyUrl('')
     flashSaved()
   }
 
@@ -83,6 +92,7 @@ export default function SettingsScreen({ server, onUpdateServer, onBack }) {
       flashSaved()
     } catch (e) {
       setError(true)
+      if (notifyError) notifyError(describeError(e))
     }
   }
 
@@ -206,12 +216,24 @@ export default function SettingsScreen({ server, onUpdateServer, onBack }) {
             <Button variant="contained" size="medium" onClick={handleSaveProxy}>
               {t('save')}
             </Button>
+            <Button
+              variant="outlined"
+              color="error"
+              size="medium"
+              disabled={!proxyInput}
+              onClick={handleDisableProxy}
+            >
+              {t('proxyOff')}
+            </Button>
             {saved ? (
               <Typography variant="body2" color="success.main">
                 {t('saved')}
               </Typography>
             ) : null}
           </Box>
+          <Typography variant="caption" color={proxyInput ? 'success.main' : 'text.secondary'}>
+            {proxyInput ? t('proxyOnState') : t('proxyOffState')}
+          </Typography>
         </Paper>
 
         <Paper elevation={2} sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
