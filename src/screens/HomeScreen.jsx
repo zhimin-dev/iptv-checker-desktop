@@ -6,8 +6,6 @@ import Typography from '@mui/material/Typography'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
-import Tabs from '@mui/material/Tabs'
-import Tab from '@mui/material/Tab'
 import IconButton from '@mui/material/IconButton'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
@@ -25,11 +23,9 @@ import { fetchAsBlobUrl, isLocalHost } from '../proxy'
 
 const GRID_PAGE = 60
 const SNAP_CHUNK = 24
-const CARD_WIDTH = 300
 
 export default function HomeScreen({ server, notifyError, onOpenChannel, onChangeServer, onOpenSettings, onOpenSearch }) {
   const { t } = useT()
-  const [tab, setTab] = useState('checked')
   const [channels, setChannels] = useState(null)
   const [favourites, setFavourites] = useState([])
   const [favPage, setFavPage] = useState(0)
@@ -39,9 +35,9 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [cacheSavedAt, setCacheSavedAt] = useState(0)
+  // 分组筛选：'' = 全部（已检查 + 已收藏），'__fav__' = 已收藏，其余为具体分组
   const [activeGroup, setActiveGroup] = useState('')
   const [gridLimit, setGridLimit] = useState(GRID_PAGE)
-  const [favLimit, setFavLimit] = useState(GRID_PAGE)
   // 是否展示频道画面：由后台设置控制
   const [showSnapshots, setShowSnapshots] = useState(false)
   // url -> { snapshot, captured_at }
@@ -72,7 +68,8 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
   /** 点击频道：把点击的频道放在首位，其余同名源作为备用（自动切换），并记录搜索历史 */
   const handleOpenChannel = (c) => {
     recordSearch(server, c.name)
-    const sameName = (channels || []).filter((x) => x.name === c.name && x.url !== c.url)
+    const allList = (channels || []).concat(favourites.map((f) => ({ id: f.id, name: f.name, url: f.url, group: '' })))
+    const sameName = allList.filter((x) => x.name === c.name && x.url !== c.url)
     onOpenChannel({ ...c, alternates: [c, ...sameName] })
   }
 
@@ -112,11 +109,6 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
       setFavourites(favData.list || [])
       setFavPage(0)
       setFavTotal(favData.total || 0)
-      // 已检查无数据但收藏有数据时，默认展示收藏 tab
-      const ch = channelsRef.current
-      if ((ch === null || ch.length === 0) && (favData.list || []).length > 0) {
-        setTab('fav')
-      }
     } catch (e) {
       console.log('favourites load failed', e)
       notifyError(t('loadFailed') + ' · ' + describeError(e))
@@ -145,7 +137,7 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
     setCacheSavedAt(0)
     setError('')
     setGridLimit(GRID_PAGE)
-    setFavLimit(GRID_PAGE)
+    setActiveGroup('')
     load(false)
   }, [server])
 
@@ -190,8 +182,9 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
       setSnapshots((prev) => ({ ...prev, ...map }))
       // 刷新后递增版本号，附加到图片 URL 上强制浏览器重新加载
       setSnapVersion((v) => v + 1)
-      // 记录成功刷新时间，作为自动刷新的计时起点
-      lastSnapRefreshRef.current = Date.now()
+      // 只有强制刷新才推进计时起点（页面打开时的缓存展示不推进），
+      // 保证打开应用后 1 分钟内就会强制抓一次最新画面
+      if (force) lastSnapRefreshRef.current = Date.now()
     } catch (e) {
       console.log('snapshots failed', e)
       notifyError(describeError(e))
@@ -223,6 +216,7 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
       const map = await fetchSnapChunks(list, !!force, false)
       setFavSnapshots((prev) => ({ ...prev, ...map }))
       setSnapVersion((v) => v + 1)
+      if (force) lastSnapRefreshRef.current = Date.now()
     } catch (e) {
       console.log('fav snapshots failed', e)
     } finally {
@@ -316,27 +310,53 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
     return () => clearInterval(timer)
   }, [])
 
-  const grouped = useMemo(() => {
-    if (!channels) return []
+  // ---------- 频道列表：全部 = 已检查 + 已收藏（去重合并） ----------
+
+  /** 收藏频道从已检查列表按 url 关联分组（收藏数据本身不带 group） */
+  const favGroupOf = useMemo(() => {
     const map = new Map()
-    for (const c of channels) {
+    for (const c of channels || []) {
+      if (c.url && !map.has(c.url)) map.set(c.url, c.group || '')
+    }
+    return map
+  }, [channels])
+
+  /** 全部频道：已检查在前，未重复的收藏追加在后（按 url 去重） */
+  const allChannels = useMemo(() => {
+    const seen = new Set()
+    const list = []
+    for (const c of channels || []) {
+      if (c.url && !seen.has(c.url)) {
+        seen.add(c.url)
+        list.push(c)
+      }
+    }
+    for (const f of favourites) {
+      if (f.url && !seen.has(f.url)) {
+        seen.add(f.url)
+        list.push({ id: f.id, name: f.name, url: f.url, group: favGroupOf.get(f.url) || '', fav: true })
+      }
+    }
+    return list
+  }, [channels, favourites, favGroupOf])
+
+  /** 分组聚合（含收藏频道关联的分组），顺序与全部列表一致 */
+  const allGrouped = useMemo(() => {
+    const map = new Map()
+    for (const c of allChannels) {
       const g = c.group || t('noGroup')
       if (!map.has(g)) map.set(g, [])
       map.get(g).push(c)
     }
     return Array.from(map.entries()).map(([group, list]) => ({ group, list }))
-  }, [channels, t])
+  }, [allChannels, t])
 
-  const visibleGroups = useMemo(() => {
-    if (!activeGroup) return grouped
-    return grouped.filter((g) => g.group === activeGroup)
-  }, [grouped, activeGroup])
-
+  /** 按选中筛选：'' = 全部，'__fav__' = 已收藏，其余为具体分组 */
   const visibleChannels = useMemo(() => {
-    const list = []
-    visibleGroups.forEach((g) => g.list.forEach((c) => list.push(c)))
-    return list
-  }, [visibleGroups])
+    if (!activeGroup) return allChannels
+    if (activeGroup === '__fav__') return allChannels.filter((c) => c.fav)
+    return allChannels.filter((c) => (c.group || t('noGroup')) === activeGroup)
+  }, [allChannels, activeGroup, t])
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -361,14 +381,17 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
           <IconButton onClick={() => load(true)} title={t('refresh')} disabled={refreshing}>
             {refreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
           </IconButton>
-          {/* 右上角：频道画面单独刷新（当前 tab 是收藏时刷新收藏画面） */}
+          {/* 右上角：频道画面刷新（已检查 + 已收藏一起刷） */}
           {showSnapshots ? (
             <IconButton
-              onClick={() => (tab === 'fav' ? loadFavSnapshots(true) : loadSnapshots(true))}
+              onClick={() => {
+                loadSnapshots(true)
+                loadFavSnapshots(true)
+              }}
               title={t('refreshSnapshots')}
-              disabled={tab === 'fav' ? favSnapLoading : snapshotLoading}
+              disabled={snapshotLoading || favSnapLoading}
             >
-              {(tab === 'fav' ? favSnapLoading : snapshotLoading) ? (
+              {snapshotLoading || favSnapLoading ? (
                 <CircularProgress size={20} />
               ) : (
                 <AddPhotoAlternateIcon />
@@ -379,10 +402,6 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
             <SettingsIcon />
           </IconButton>
         </Toolbar>
-        <Tabs value={tab} onChange={(e, v) => setTab(v)} variant="fullWidth">
-          <Tab value="checked" label={t('sourceChecked') + '（' + (channels ? channels.length : 0) + '）'} />
-          <Tab value="fav" label={t('favouriteTitle') + '（' + favTotal + '）'} />
-        </Tabs>
       </AppBar>
 
       <Box sx={{ flex: 1, overflowY: 'auto', px: 2, pb: 2 }}>
@@ -404,100 +423,82 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
           </Box>
         ) : null}
 
-        {tab === 'checked' ? (
+        {!loading && !error && allChannels.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="body1" sx={{ mb: 1 }}>
+              {t('checkedEmpty')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {t('checkedEmptyHint')}
+            </Typography>
+            <Button variant="contained" onClick={() => load(true)}>
+              {t('retry')}
+            </Button>
+          </Box>
+        ) : null}
+
+        {allChannels.length > 0 ? (
           <>
-            {!loading && !error && channels && channels.length === 0 ? (
-              <Box sx={{ textAlign: 'center', py: 6 }}>
-                <Typography variant="body1" sx={{ mb: 1 }}>
-                  {t('checkedEmpty')}
+            {/* 分组筛选：[全部] [已收藏] [分组...]，分组很多时自动上下换行，不横向滑动 */}
+            <Box sx={{ mt: 2, mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              {cacheSavedAt ? (
+                <Typography variant="caption" color="text.secondary">
+                  {t('cachedAt')} · {t('cacheSavedAt', { t: new Date(cacheSavedAt).toLocaleString() })}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  {t('checkedEmptyHint')}
-                </Typography>
-                <Button variant="contained" onClick={() => load(true)}>
-                  {t('retry')}
+              ) : null}
+              <Chip
+                label={t('allGroups')}
+                size="small"
+                color={activeGroup === '' ? 'primary' : 'default'}
+                variant={activeGroup === '' ? 'filled' : 'outlined'}
+                onClick={() => setActiveGroup('')}
+              />
+              <Chip
+                label={t('favouriteTitle') + '（' + favTotal + '）'}
+                size="small"
+                color={activeGroup === '__fav__' ? 'primary' : 'default'}
+                variant={activeGroup === '__fav__' ? 'filled' : 'outlined'}
+                onClick={() => setActiveGroup(activeGroup === '__fav__' ? '' : '__fav__')}
+              />
+              {allGrouped.map((g) => (
+                <Chip
+                  key={g.group}
+                  label={g.group}
+                  size="small"
+                  color={activeGroup === g.group ? 'primary' : 'default'}
+                  variant={activeGroup === g.group ? 'filled' : 'outlined'}
+                  onClick={() => setActiveGroup(activeGroup === g.group ? '' : g.group)}
+                />
+              ))}
+            </Box>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+              {visibleChannels.slice(0, gridLimit).map((c) => (
+                <ChannelCard
+                  key={(c.fav ? 'fav-' : 'ch-') + (c.id || c.url)}
+                  channel={c}
+                  snapshotMeta={showSnapshots ? (c.fav ? favSnapshots[c.url] : snapshots[c.url]) : null}
+                  version={snapVersion}
+                  tick={tick}
+                  server={server}
+                  stretch={visibleChannels.length < 3}
+                  onClick={() => handleOpenChannel(c)}
+                  action={
+                    c.fav ? (
+                      <IconButton size="small" onClick={(e) => handleRemoveFavourite(e, c.id)} title={t('unfavourite')}>
+                        <FavoriteIcon fontSize="small" color="error" />
+                      </IconButton>
+                    ) : undefined
+                  }
+                />
+              ))}
+            </Box>
+            {visibleChannels.length > gridLimit ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
+                <Button size="small" onClick={() => setGridLimit((n) => n + GRID_PAGE)}>
+                  {t('loadMore')} ({gridLimit}/{visibleChannels.length})
                 </Button>
               </Box>
             ) : null}
-
-            {channels && channels.length > 0 ? (
-              <>
-                {/* 分组筛选；分组很多时自动上下换行，不横向滑动（画面刷新按钮已移到右上角图标） */}
-                <Box sx={{ mt: 2, mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  {cacheSavedAt ? (
-                    <Typography variant="caption" color="text.secondary">
-                      {t('cachedAt')} · {t('cacheSavedAt', { t: new Date(cacheSavedAt).toLocaleString() })}
-                    </Typography>
-                  ) : null}
-                  <Chip
-                    label={t('allGroups')}
-                    size="small"
-                    color={activeGroup === '' ? 'primary' : 'default'}
-                    variant={activeGroup === '' ? 'filled' : 'outlined'}
-                    onClick={() => setActiveGroup('')}
-                  />
-                  {grouped.map((g) => (
-                    <Chip
-                      key={g.group}
-                      label={g.group}
-                      size="small"
-                      color={activeGroup === g.group ? 'primary' : 'default'}
-                      variant={activeGroup === g.group ? 'filled' : 'outlined'}
-                      onClick={() => setActiveGroup(activeGroup === g.group ? '' : g.group)}
-                    />
-                  ))}
-                </Box>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                  {visibleChannels.slice(0, gridLimit).map((c) => (
-                    <ChannelCard
-                      key={c.id || c.url}
-                      channel={c}
-                      snapshotMeta={showSnapshots ? snapshots[c.url] : null}
-                      version={snapVersion}
-                      tick={tick}
-                      server={server}
-                      onClick={() => handleOpenChannel(c)}
-                    />
-                  ))}
-                </Box>
-                {visibleChannels.length > gridLimit ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-                    <Button size="small" onClick={() => setGridLimit((n) => n + GRID_PAGE)}>
-                      {t('loadMore')} ({gridLimit}/{visibleChannels.length})
-                    </Button>
-                  </Box>
-                ) : null}
-              </>
-            ) : null}
-          </>
-        ) : (
-          <>
-            {favourites.length === 0 && !favLoadingMore ? (
-              <Box sx={{ textAlign: 'center', py: 6 }}>
-                <Typography variant="body1" color="text.secondary">
-                  {t('favouriteEmptyHint')}
-                </Typography>
-              </Box>
-            ) : (
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mt: 2 }}>
-                {favourites.slice(0, favLimit).map((f) => (
-                  <ChannelCard
-                    key={f.id}
-                    channel={{ id: f.id, name: f.name, url: f.url, group: '' }}
-                    snapshotMeta={showSnapshots ? favSnapshots[f.url] : null}
-                    version={snapVersion}
-                    tick={tick}
-                    server={server}
-                    onClick={() => handleOpenChannel({ id: f.id, name: f.name, url: f.url, group: '' }) }
-                    action={
-                      <IconButton size="small" onClick={(e) => handleRemoveFavourite(e, f.id)} title={t('unfavourite')}>
-                        <FavoriteIcon fontSize="small" color="error" />
-                      </IconButton>
-                    }
-                  />
-                ))}
-              </Box>
-            )}
             {favourites.length < favTotal ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
                 <Button size="small" onClick={loadMoreFavourites} disabled={favLoadingMore}>
@@ -506,7 +507,7 @@ export default function HomeScreen({ server, notifyError, onOpenChannel, onChang
               </Box>
             ) : null}
           </>
-        )}
+        ) : null}
       </Box>
     </Box>
   )
@@ -522,8 +523,9 @@ function fmtSnapAge(ts, t) {
   return t('snapAgeHour', { h: Math.floor(diff / 3600) })
 }
 
-/** 统一尺寸的小电视卡片：固定 300 宽，16:9 画面区，固定高度名称行 */
-function ChannelCard({ channel, snapshotMeta, server, onClick, action, version, tick }) {
+/** 统一尺寸的小电视卡片：常规网格固定宽度（末行与上行宽度一致，小屏保证一排至少 2 个）；
+ *  stretch=true（频道不足 3 个）时拉伸撑满整行，避免右侧留白。16:9 画面区，固定高度名称行 */
+function ChannelCard({ channel, snapshotMeta, server, onClick, action, version, tick, stretch }) {
   const { t } = useT()
   const snapshot = snapshotMeta && snapshotMeta.snapshot ? snapshotMeta.snapshot : ''
   const ageText = snapshot ? fmtSnapAge(snapshotMeta.captured_at, t) : ''
@@ -531,8 +533,12 @@ function ChannelCard({ channel, snapshotMeta, server, onClick, action, version, 
     <Card
       sx={{
         cursor: 'pointer',
-        width: CARD_WIDTH,
-        flexShrink: 0,
+        // 不足 3 个频道：卡片拉伸平分整行宽度，不残留右侧空白；
+        // 常规网格：固定宽度，末行不被 flex-grow 拉伸、与上行宽度一致，
+        // 且宽度不超过 (容器宽 - 间距)/2，小屏下保证一排至少放 2 个
+        flex: stretch ? '1 1 240px' : '0 0 auto',
+        width: stretch ? undefined : 'min(300px, calc((100% - 16px) / 2))',
+        maxWidth: '100%',
         display: 'flex',
         flexDirection: 'column',
         transition: 'transform 0.15s ease',
@@ -544,7 +550,7 @@ function ChannelCard({ channel, snapshotMeta, server, onClick, action, version, 
         sx={{
           position: 'relative',
           width: '100%',
-          height: CARD_WIDTH * 9 / 16,
+          aspectRatio: '16 / 9',
           bgcolor: '#0d0d0d',
           display: 'flex',
           alignItems: 'center',

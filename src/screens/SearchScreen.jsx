@@ -63,6 +63,9 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
   const [resultLimit, setResultLimit] = useState(LIST_PAGE)
   const [groupLimit, setGroupLimit] = useState(LIST_PAGE)
   const searchTimer = useRef(0)
+  // 滚动容器与自动加载
+  const scrollRef = useRef(null)
+  const loadMoreRef = useRef(null)
 
   const load = async (force) => {
     setLoading(true)
@@ -75,6 +78,14 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
         const cached = await getCachedChannels(source)
         if (cached && cached.server === server && !force) {
           setChannels(cached.list)
+          // 缓存秒开，但后台仍拉取服务器最新列表并替换：
+          // 旧缓存可能残留已删除源的历史数据（如 IP 样式的频道名）
+          getChannels(server, source, true)
+            .then((data) => {
+              setChannels(data.list || [])
+              setCachedChannels(data.list || [], server, source)
+            })
+            .catch(() => {})
         } else {
           const data = await getChannels(server, source, !!force)
           setChannels(data.list || [])
@@ -100,6 +111,33 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
     setGroupLimit(LIST_PAGE)
     load(false)
   }, [server, source, onlyPlayable])
+
+  /** 滚动到底部时自动加载对应视图的下一页 */
+  const loadMoreVisible = () => {
+    if (searching && searchMode === 'group' && groupSearchResults.length > catLimit) {
+      setCatLimit((n) => n + CAT_PAGE)
+    } else if (searching && searchMode !== 'group' && searchResults.length > resultLimit) {
+      setResultLimit((n) => n + LIST_PAGE)
+    } else if (!searching && selectedGroup && groupChannels.length > groupLimit) {
+      setGroupLimit((n) => n + LIST_PAGE)
+    } else if (!searching && !selectedGroup && categories.length > catLimit) {
+      setCatLimit((n) => n + CAT_PAGE)
+    }
+  }
+  loadMoreRef.current = loadMoreVisible
+
+  // 滚动到底部自动加载
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) {
+        loadMoreRef.current && loadMoreRef.current()
+      }
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
   const handleQueryChange = (val) => {
     setQuery(val)
@@ -239,7 +277,7 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
         ) : null}
       </Box>
 
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 2, pb: 2 }}>
+      <Box ref={scrollRef} sx={{ flex: 1, overflowY: 'auto', px: 2, pb: 2 }}>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress />
@@ -344,9 +382,7 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
                   </List>
                   {groupSearchResults.length > catLimit ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-                      <Button size="small" onClick={() => setCatLimit((n) => n + CAT_PAGE)}>
-                        {t('loadMore')} ({catLimit}/{groupSearchResults.length})
-                      </Button>
+                      <CircularProgress size={14} />
                     </Box>
                   ) : null}
                 </Box>
@@ -368,9 +404,7 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
                   </List>
                   {searchResults.length > resultLimit ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-                      <Button size="small" onClick={() => setResultLimit((n) => n + LIST_PAGE)}>
-                        {t('loadMore')} ({resultLimit}/{searchResults.length})
-                      </Button>
+                      <CircularProgress size={14} />
                     </Box>
                   ) : null}
                 </Box>
@@ -400,9 +434,7 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
               </List>
               {groupChannels.length > groupLimit ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-                  <Button size="small" onClick={() => setGroupLimit((n) => n + LIST_PAGE)}>
-                    {t('loadMore')} ({groupLimit}/{groupChannels.length})
-                  </Button>
+                  <CircularProgress size={14} />
                 </Box>
               ) : null}
             </Box>
@@ -440,9 +472,7 @@ export default function SearchScreen({ server, notifyError, onOpenChannel, onBac
               </List>
               {categories.length > catLimit ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-                  <Button size="small" onClick={() => setCatLimit((n) => n + CAT_PAGE)}>
-                    {t('loadMore')} ({catLimit}/{categories.length})
-                  </Button>
+                  <CircularProgress size={14} />
                 </Box>
               ) : null}
             </Box>

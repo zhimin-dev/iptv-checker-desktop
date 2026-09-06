@@ -27,7 +27,7 @@ Jellyfin 风格的 IPTV 播放客户端：连接 [iptv-checker](https://github.c
 ## 架构
 
     +-----------------------------+          HTTP (REST + HLS)
-    |  iptv-checker-desktop       |  ------------------------------>  iptv-checker-rs 服务端
+    |  iptv-checker-player        |  ------------------------------>  iptv-checker-rs 服务端
     |  (Tauri 2 + React + video.js)|                                   |
     +-----------------------------+          ffmpeg 拉流切片缓存到本地 <--- 流畅模式
             |                                                         |

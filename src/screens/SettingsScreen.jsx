@@ -12,6 +12,8 @@ import Alert from '@mui/material/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import Select from '@mui/material/Select'
 import MenuItem from '@mui/material/MenuItem'
+import Switch from '@mui/material/Switch'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import { useT } from '../i18n'
 import { getProxyUrl, setProxyUrl } from '../proxy'
 import {
@@ -36,6 +38,7 @@ export default function SettingsScreen({ server, notifyError, onUpdateServer, on
   const [ttlHours, setTtlHours] = useState(24)
   const [cacheCleared, setCacheCleared] = useState(false)
   const [proxyInput, setProxyInput] = useState(() => getProxyUrl())
+  const [proxyEnabled, setProxyEnabled] = useState(() => !!getProxyUrl())
   const [snapInterval, setSnapIntervalState] = useState(() => getSnapInterval())
 
   // 读取服务端缓存配置
@@ -77,11 +80,14 @@ export default function SettingsScreen({ server, notifyError, onUpdateServer, on
     flashSaved()
   }
 
-  /** 关闭代理：清空代理配置（本机/内网地址本来就直连，外网恢复系统直连） */
-  const handleDisableProxy = () => {
-    setProxyInput('')
-    setProxyUrl('')
-    flashSaved()
+  /** 代理开关：关闭即清空代理配置（本机/内网地址本来就直连，外网恢复系统直连） */
+  const handleProxyToggle = (enabled) => {
+    setProxyEnabled(enabled)
+    if (!enabled) {
+      setProxyInput('')
+      setProxyUrl('')
+      flashSaved()
+    }
   }
 
   const handleSaveCacheConfig = async () => {
@@ -198,42 +204,49 @@ export default function SettingsScreen({ server, notifyError, onUpdateServer, on
         </Paper>
 
         <Paper elevation={2} sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Typography variant="subtitle1" fontWeight={600}>
-            {t('proxyTitle')}
-          </Typography>
-          <TextField
-            size="small"
-            label={t('proxyUrl')}
-            placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            value={proxyInput}
-            onChange={(e) => setProxyInput(e.target.value)}
-            helperText={t('proxyHint')}
-          />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Button variant="contained" size="medium" onClick={handleSaveProxy}>
-              {t('save')}
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              size="medium"
-              disabled={!proxyInput}
-              onClick={handleDisableProxy}
-            >
-              {t('proxyOff')}
-            </Button>
-            {saved ? (
-              <Typography variant="body2" color="success.main">
-                {t('saved')}
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={proxyEnabled}
+                onChange={(e) => handleProxyToggle(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="subtitle1" fontWeight={600}>
+                {t('proxyTitle')}
               </Typography>
-            ) : null}
-          </Box>
-          <Typography variant="caption" color={proxyInput ? 'success.main' : 'text.secondary'}>
-            {proxyInput ? t('proxyOnState') : t('proxyOffState')}
-          </Typography>
+            }
+          />
+          {proxyEnabled ? (
+            <>
+              <TextField
+                size="small"
+                label={t('proxyUrl')}
+                placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                value={proxyInput}
+                onChange={(e) => setProxyInput(e.target.value)}
+                helperText={t('proxyHint')}
+              />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Button variant="contained" size="medium" onClick={handleSaveProxy}>
+                  {t('save')}
+                </Button>
+                {saved ? (
+                  <Typography variant="body2" color="success.main">
+                    {t('saved')}
+                  </Typography>
+                ) : null}
+              </Box>
+            </>
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              {t('proxyOffState')}
+            </Typography>
+          )}
         </Paper>
 
         <Paper elevation={2} sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5 }}>

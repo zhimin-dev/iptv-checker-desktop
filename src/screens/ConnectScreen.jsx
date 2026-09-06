@@ -115,7 +115,7 @@ export default function ConnectScreen({ notifyError, onConnected, onOpenSettings
         </Button>
 
         <Typography variant="caption" color="text.secondary">
-          iptv-checker-desktop · v0.1.0
+          iptv-checker-player · v0.1.0
         </Typography>
       </Paper>
     </Box>
